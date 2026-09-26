@@ -32,6 +32,11 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg["http_port"], 9330)
         self.assertIsNone(cfg["pinned_zone_id"])
 
+    def test_strict_pins_is_opt_in_and_persists(self):
+        self.assertFalse(config.load()["strict_pins"])
+        config.save({"strict_pins": True})
+        self.assertIs(config.load()["strict_pins"], True)
+
     def test_save_then_load_round_trips(self):
         config.save({"host": "192.168.50.118", "tcp_port": 9150,
                      "http_port": 9330, "name": "yavin", "pinned_zone_id": "z1"})
@@ -93,7 +98,8 @@ class TestConfig(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.bootstrap_core("192.168.50.99", 9330, 9150)
 
-        self.assertEqual(config.load(), original)
+        # New settings get their default without changing the saved Core.
+        self.assertEqual(config.load(), dict(original, strict_pins=False))
 
     def test_the_cores_identity_round_trips(self):
         # `save`/`load` filter against DEFAULTS, so a field missing from that
