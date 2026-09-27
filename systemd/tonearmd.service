@@ -51,8 +51,38 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%h/.config/tonearm
+# tmpfs, not read-only. `read-only` still exposes every file the user owns
+# for READING -- ~/.ssh, browser profiles, password stores -- to a daemon that
+# parses untrusted LAN bytes through a vendored library and has outbound
+# network to send them somewhere. An empty tmpfs plus two binds is the
+# difference between "cannot write your home" and "cannot see it".
+ProtectHome=tmpfs
+# Its own code, since ExecStart lives here and $HOME is now empty.
+BindReadOnlyPaths=%h/.config/omarchy/plugins/ssandys.tonearm
+# Its own state: Core address, pairing token, pinned zone.
+BindPaths=%h/.config/tonearm
+
+# Measured on a running daemon, not chosen from a template -- the same rule
+# as the directives above. Steady state is 6 threads, 12 descriptors and a
+# 36 MB peak RSS. The spike is discovery's /24 sweep, whose ThreadPoolExecutor
+# is 128 workers: measured at 130 threads and 132 descriptors at peak.
+#
+# So TasksMax must clear ~134, and a value like 64 would not break anything
+# visible -- it would break the sweep, which is the fallback relocation needs
+# on a LAN where multicast never arrives (#17). These leave roughly 2x.
+TasksMax=256
+LimitNOFILE=512
+# Art is capped at 1 MiB on the wire and its decoded dimensions are checked,
+# so steady use is tens of MB. This is not a tight bound, it is a ceiling: the
+# point is that a runaway in the daemon is killed as the daemon rather than
+# taken out of the desktop session by the OOM killer, after which
+# Restart=on-failure brings it back.
+MemoryMax=256M
+# Tested live before shipping, because it breaks anything that JITs: every
+# daemon import -- roonapi, websocket, dbus_next and tonearm_lib itself --
+# loads and runs under it on plain CPython. Revisit if the interpreter's
+# experimental JIT is ever enabled in this distribution's build.
+MemoryDenyWriteExecute=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes

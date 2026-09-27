@@ -282,24 +282,37 @@ class TestSandboxPrerequisites(SetupTestCase):
         self.run_setup()
         self.assertEqual(os.stat(self.state_dir()).st_mode & 0o077, 0)
 
-    def test_every_readwritepath_in_the_unit_exists_after_setup(self):
+    # Every directive whose source path must EXIST when the unit starts.
+    # ReadWritePaths was the only one until #42 replaced it with binds; all
+    # three fail the same way, at step NAMESPACE, before the process runs.
+    PATH_DIRECTIVES = ("ReadWritePaths=", "BindPaths=", "BindReadOnlyPaths=")
+
+    def test_every_bound_path_in_the_unit_exists_after_setup(self):
         """The coupling, asserted rather than assumed.
 
-        A ReadWritePaths line added to the unit without a matching mkdir in
+        A path directive added to the unit without a matching mkdir in
         setup.sh does not degrade -- the unit refuses to start at all, with
         an error that names systemd rather than this plugin. This catches
         that at test time instead of on someone's first install.
+
+        Widened from ReadWritePaths alone in #42, which swapped that for
+        BindPaths and BindReadOnlyPaths to get $HOME hidden rather than
+        merely read-only. The guard caught the swap, which is what it is for,
+        and the requirement it protects did not change: systemd will not
+        start a unit whose bind source is missing either.
         """
         self.run_setup()
         with open(self.target) as handle:
             unit = handle.read()
-        paths = [line.split("=", 1)[1].strip()
+        paths = [(line.split("=", 1)[0], line.split("=", 1)[1].strip())
                  for line in unit.splitlines()
-                 if line.startswith("ReadWritePaths=")]
-        self.assertTrue(paths, "the unit declares no ReadWritePaths")
-        for raw in paths:
+                 if line.startswith(self.PATH_DIRECTIVES)]
+        self.assertTrue(paths, "the unit declares no path directives at all")
+        for directive, raw in paths:
             for entry in raw.split():
-                path = entry.lstrip("-").replace("%h", self.home)
+                # A bind may be `source:dest`; the source is what must exist.
+                source = entry.lstrip("-").split(":")[0]
+                path = source.replace("%h", self.home)
                 self.assertTrue(os.path.isdir(path),
-                                "%s is in ReadWritePaths but setup.sh does "
-                                "not create it" % entry)
+                                "%s is in %s but setup.sh does not create it"
+                                % (entry, directive))
