@@ -329,6 +329,7 @@ Panel {
             spacing: Style.space(7)
 
             Text {
+              textFormat: Text.PlainText
               // The same product icon the bar shows, so the popup and its
               // button read as one thing.
               text: Model.GLYPH_VINYL
@@ -338,6 +339,7 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
             }
             Text {
+              textFormat: Text.PlainText
               id: headerName
               text: "Tonearm"
               color: root.fgMid
@@ -349,6 +351,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             // Anchored to BOTH edges rather than just the right one: elide
             // needs a bounded width, and "Enable tonearm in Roon -> Settings
             // -> Extensions" is far wider than the gap beside the name. Right
@@ -359,6 +362,19 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             horizontalAlignment: Text.AlignRight
+            // textFormat is set on EVERY Text in this file and BrowsePane's,
+            // not only the ones carrying Core data (#22). Qt's default is
+            // AutoText, which silently becomes StyledText when a string looks
+            // like markup -- and StyledText loads images remotely, from inside
+            // omarchy-shell, the process every widget shares. Every string
+            // here comes from the Core: titles, artists, albums, zone names,
+            // browse rows, this status line. A track called
+            // `<img src="http://example/x.png">` would make the SHELL fetch
+            // that URL, and it takes an edited library entry rather than a
+            // hostile Core. Set everywhere because "does this one carry Core
+            // data?" is a judgement someone must repeat on every new binding,
+            // and being wrong is silent. A title containing `<3` also renders
+            // correctly now, which it did not before.
             text: Model.headerStatus(root.st)
             // The same three-way severity split the bar button uses, so a
             // fault reads as a fault in both places at once.
@@ -432,6 +448,7 @@ Panel {
               spacing: Style.space(3)
 
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: root.np ? (root.np.title || "Nothing playing") : "Nothing playing"
                 color: Color.foreground
@@ -443,6 +460,7 @@ Panel {
                 elide: Text.ElideRight
               }
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: root.np ? (root.np.artist || "") : ""
                 color: root.fgMid
@@ -451,6 +469,7 @@ Panel {
                 elide: Text.ElideRight
               }
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 text: root.np ? (root.np.album || "") : ""
                 color: root.fgFaint
@@ -538,6 +557,7 @@ Panel {
                 height: Style.space(36)
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.left: parent.left
                   anchors.verticalCenter: parent.verticalCenter
                   text: Model.formatTime(root.pos)
@@ -552,6 +572,7 @@ Panel {
                   spacing: Style.space(18)
 
                   Text {
+                    textFormat: Text.PlainText
                     // Model.GLYPH_PREV, not a typed "⏮" -- plain Unicode media
                     // symbols (U+23EE here) carry emoji presentation in the
                     // deployed font and render as a colour block, not a
@@ -581,6 +602,7 @@ Panel {
                     // the art-derived color for the seek fill alone.
                     color: Color.accent
                     Text {
+                      textFormat: Text.PlainText
                       anchors.centerIn: parent
                       // These two glyphs are an ACTION here: paused offers play.
                       // The bar no longer uses either one (it shows the product
@@ -596,6 +618,7 @@ Panel {
                   }
 
                   Text {
+                    textFormat: Text.PlainText
                     text: Model.GLYPH_NEXT
                     color: root.fgMid
                     font.family: root.fontFamily
@@ -610,6 +633,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
                   text: Model.formatRemaining(root.pos, root.length)
@@ -634,6 +658,7 @@ Panel {
           visible: root.volume !== null
 
           Text {
+            textFormat: Text.PlainText
             // Model.GLYPH_VOLUME_MUTED/GLYPH_VOLUME_HIGH, built with
             // String.fromCodePoint in Model.js rather than a literal escape
             // here -- routed through the same constant-glyph convention as
@@ -690,6 +715,7 @@ Panel {
           }
 
           Text {
+            textFormat: Text.PlainText
             text: root.volume ? String(root.volume.value) : ""
             color: root.fgFaint
             font.family: root.fontFamily
@@ -720,6 +746,7 @@ Panel {
             height: zonesLabel.implicitHeight
 
             Text {
+              textFormat: Text.PlainText
               id: zonesLabel
               anchors.left: parent.left
               text: "ZONES"
@@ -730,6 +757,7 @@ Panel {
             }
 
             Text {
+              textFormat: Text.PlainText
               id: searchHint
               anchors.right: parent.right
               // baseline, not verticalCenter: the two labels differ in
@@ -778,6 +806,7 @@ Panel {
                   color: zoneRow.modelData.state === "playing" ? Color.accent : Color.muted
                 }
                 Text {
+                  textFormat: Text.PlainText
                   text: zoneRow.modelData.name
                   color: root.fgMid
                   font.family: root.fontFamily
@@ -786,6 +815,7 @@ Panel {
               }
 
               Text {
+                textFormat: Text.PlainText
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
@@ -818,6 +848,7 @@ Panel {
               // "pinned" label above, because canTransferTo excludes the
               // followed zone, which is the only row that label appears on.
               Text {
+                textFormat: Text.PlainText
                 id: transferGlyph
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(8)

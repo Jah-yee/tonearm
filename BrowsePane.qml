@@ -311,6 +311,7 @@ Item {
     }
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       visible: root.path.length > 0
       text: "‹  " + root.path.join("  ›  ")
@@ -321,6 +322,7 @@ Item {
     }
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       visible: root.errorText.length > 0
       text: root.errorText
@@ -331,6 +333,7 @@ Item {
     }
 
     Text {
+      textFormat: Text.PlainText
       width: parent.width
       visible: !root.busy && root.path.length > 0 && root.rows.length === 0
                && root.errorText.length === 0
@@ -391,6 +394,7 @@ Item {
             spacing: Style.space(1)
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               // Defended at the use site even though the daemon guarantees a
               // non-null title/subtitle (spec 5.3) -- same idiom as
@@ -406,6 +410,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText
               width: parent.width
               visible: (modelData.subtitle || "").length > 0
               text: modelData.subtitle || ""
