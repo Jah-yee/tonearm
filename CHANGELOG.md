@@ -4,6 +4,40 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.12.2 — 2026-09-27
+
+Two hardening fixes from a security review of the whole codebase.
+
+### Fixed
+
+- **Text from the Core is rendered as plain text**
+  ([#22](https://github.com/ssandys/tonearm/issues/22)). Qt's default text
+  mode switches to rich text whenever a string looks like markup, and rich
+  text loads images over the network. Everything tonearm displays comes from
+  the Core — titles, artists, albums, zone names, browse rows — so a track
+  named `<img src="http://example/x.png">` made the shell every widget shares
+  fetch that URL when the popup rendered it. That needed no hostile Core: an
+  edited library entry was enough.
+
+  Every text item now declares plain text, not only the ones known to carry
+  Core data, and a test enforces it so a new one cannot quietly reintroduce
+  the problem. A title containing `<` — `<3`, `<Untitled>` — also renders
+  correctly now, which it did not before.
+
+### Changed
+
+- **The daemon can no longer read your home directory**
+  ([#42](https://github.com/ssandys/tonearm/issues/42)). Its sandbox made
+  `$HOME` read-only, which still exposed every file you own — SSH keys,
+  browser profiles, password stores — to a process that parses untrusted
+  network data and can make outbound connections. It now sees an empty
+  directory plus its own code and its own settings, and nothing else.
+
+  Memory, thread and file-descriptor ceilings were added as well, sized from
+  measurements of the running daemon rather than picked from a template, so
+  that a runaway is contained to the daemon and restarted instead of taking
+  the desktop session with it.
+
 ## 0.12.1 — 2026-09-27
 
 ### Fixed
