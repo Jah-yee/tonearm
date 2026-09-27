@@ -28,6 +28,8 @@ sys.path.insert(0, os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "scripts")))
 
 from tonearm_lib import config   # noqa: E402
+
+import fakes  # noqa: E402
 from tonearm_lib import core     # noqa: E402
 
 
@@ -115,7 +117,17 @@ class TestChoosingTheCoreToAdopt(unittest.TestCase):
 
 
 class _ConfigIsolated(unittest.TestCase):
-    """Point config.py at a scratch dir, exactly as test_core.py does."""
+    """Point config.py AND the runtime directory at scratch dirs.
+
+    The runtime half is not optional. #33 moved the sweep budget out of the
+    process and into `$XDG_RUNTIME_DIR/tonearm`, so any test that reaches
+    `_find_relocated` reads and WRITES there -- and without this, that is the
+    live daemon's own runtime directory. Caught the hard way: a test run left
+    `{"attempts": 25}` beside the running daemon's socket, which then read as
+    "this outage is old, do not sweep" both for the next test and for the
+    daemon. Isolating it in the shared base is what stops the next class
+    forgetting.
+    """
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -123,6 +135,9 @@ class _ConfigIsolated(unittest.TestCase):
         self._prev = os.environ.get("XDG_CONFIG_HOME")
         os.environ["XDG_CONFIG_HOME"] = self.tmp.name
         config.reset_paths()
+        # Shared, not repeated here: it also silences the watcher thread a
+        # successful start() would otherwise leak into the rest of the suite.
+        fakes.isolate_runtime_dir(self)
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -351,8 +366,30 @@ class TestTheWatcherRelocates(_ConfigIsolated):
                 s._check_connection()
         self.assertEqual(discover.call_count, windows)
         swept = [c for c in discover.call_args_list if c.kwargs.get("scan")]
-        # Windows 1-4, then every eighth: 12 and 20. Emphatically not 20 of 20.
-        self.assertEqual(len(swept), 6, discover.call_args_list)
+        # Twenty windows inside one real second: the four eager attempts, and
+        # nothing else, because no CLOCK time has passed. This asserted six
+        # until #33, when the bound stopped being a count of attempts -- and
+        # the number falling is the point, since those twenty windows are what
+        # a restart loop delivers in well under a minute.
+        self.assertEqual(len(swept), 4, discover.call_args_list)
+
+    def test_the_clock_eventually_unlocks_another_sweep(self):
+        # The other half of the bound: a Core still absent much later must
+        # still be looked for, or an overnight router reboot is never found.
+        s, _restarts = self._down_session()
+        clock = [10_000.0]
+        with unittest.mock.patch.object(core.sood, "discover",
+                                        return_value=[]) as discover, \
+             unittest.mock.patch.object(core.time, "time", lambda: clock[0]):
+            for _ in range(core.RELOCATE_SAMPLES * 5):
+                s._check_connection()
+            self.assertEqual(
+                len([c for c in discover.call_args_list if c.kwargs.get("scan")]), 4)
+            clock[0] += core.SWEEP_BACKOFF_SECONDS + 1
+            for _ in range(core.RELOCATE_SAMPLES):
+                s._check_connection()
+        swept = [c for c in discover.call_args_list if c.kwargs.get("scan")]
+        self.assertEqual(len(swept), 5, discover.call_args_list)
 
     def test_a_daemon_with_no_restart_hook_does_not_crash_the_watcher(self):
         # RoonSession is constructed without the hook in several tests and in
@@ -511,25 +548,36 @@ class TestWhenTheSweepIsWorthPaying(unittest.TestCase):
     only; this bounds it in time instead.
     """
 
-    def test_the_first_windows_always_sweep(self):
-        # ~94% cumulative at the measured hit rate, inside about 8 minutes.
+    def test_the_first_attempts_always_sweep(self):
+        # ~94% cumulative at the measured hit rate. Eager regardless of clock:
+        # a coin flip is not improved by waiting between throws.
         for n in (1, 2, 3, 4):
-            self.assertTrue(core._should_sweep(n), "window %d" % n)
+            self.assertTrue(core._should_sweep(n, now=1000.0, last_sweep=999.0),
+                            "attempt %d" % n)
 
-    def test_it_then_backs_off_rather_than_hunting_all_day(self):
-        for n in range(5, 12):
-            self.assertFalse(core._should_sweep(n), "window %d" % n)
+    def test_after_that_it_is_the_clock_that_decides_not_the_count(self):
+        # #33: counting attempts is not a bound, because attempts do not
+        # arrive at a fixed rate. Watcher windows are RELOCATE_AFTER apart;
+        # a crash-restart loop arrives every few seconds. The same count
+        # therefore means eight minutes in one regime and forty seconds in
+        # the other, and only the clock means the same thing in both.
+        self.assertFalse(core._should_sweep(5, now=1000.0, last_sweep=999.0))
+        self.assertTrue(core._should_sweep(
+            5, now=1000.0 + core.SWEEP_BACKOFF_SECONDS, last_sweep=1000.0))
 
-    def test_it_keeps_trying_occasionally_so_a_late_return_is_found(self):
-        # A Core that comes back at a new address hours later -- an overnight
-        # router reboot -- must still be picked up without a restart.
-        self.assertTrue(core._should_sweep(12))
-        self.assertTrue(core._should_sweep(20))
+    def test_a_late_return_is_still_found(self):
+        # A Core back at a new address after an overnight router reboot.
+        self.assertTrue(core._should_sweep(
+            99, now=50_000.0, last_sweep=0.0))
 
-    def test_a_zero_or_negative_window_never_sweeps(self):
-        # Nothing asks at zero; a counter that drifts must not start sweeping.
-        self.assertFalse(core._should_sweep(0))
-        self.assertFalse(core._should_sweep(-1))
+    def test_a_zero_or_negative_attempt_never_sweeps(self):
+        self.assertFalse(core._should_sweep(0, now=1000.0, last_sweep=0.0))
+        self.assertFalse(core._should_sweep(-1, now=1000.0, last_sweep=0.0))
+
+    def test_a_clock_that_goes_backwards_does_not_unlock_the_sweep(self):
+        # Suspend/resume and NTP steps both move this clock. A negative
+        # elapsed time must not read as "long enough ago".
+        self.assertFalse(core._should_sweep(9, now=100.0, last_sweep=99_000.0))
 
 
 class TestTheSweepFallbackInPractice(_ConfigIsolated):
@@ -581,7 +629,7 @@ class TestTheSweepFallbackInPractice(_ConfigIsolated):
                 core.sood, "discover",
                 return_value=[a_core(unique_id="uid-yavin")]) as discover:
             session._find_relocated()
-        self.assertEqual(session._unresolved_windows, 0)
+        self.assertEqual(core._load_sweep_state(), (0, 0.0))
         with unittest.mock.patch.object(core.sood, "discover",
                                         return_value=[]) as discover:
             session._find_relocated()
@@ -644,3 +692,63 @@ class TestAFlappingDiscoveryDoesNotFlapTheJournal(_ConfigIsolated):
              self.assertLogs(core.LOG, level="WARNING") as logged:
             session._find_relocated()
         self.assertEqual(len(logged.output), 1, logged.output)
+
+
+class TestTheSweepBudgetSurvivesARestart(unittest.TestCase):
+    """#33: the backoff was per-process, and this process is built to die.
+
+    `start()` calls `sys.exit(1)` when it cannot reach the Core, the unit
+    carries `Restart=on-failure` with `StartLimitIntervalSec=0`, so a Core
+    that is switched off produces a restart every few seconds forever. A
+    counter initialised to zero in `__init__` is therefore always at its
+    first, eager attempt, and every one of those restarts swept the LAN --
+    which is precisely the "unsolicited scanning of someone else's network,
+    on a loop" that the budget exists to prevent, arriving by the one path
+    the budget could not see.
+
+    The state lives in the runtime directory: writable inside the unit's
+    sandbox, already the socket's home, and cleared on logout, which is about
+    the right lifetime for "am I in the middle of an outage".
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._prev = os.environ.get("XDG_RUNTIME_DIR")
+        os.environ["XDG_RUNTIME_DIR"] = self.tmp.name
+        os.makedirs(os.path.join(self.tmp.name, "tonearm"), exist_ok=True)
+
+        def restore():
+            if self._prev is None:
+                os.environ.pop("XDG_RUNTIME_DIR", None)
+            else:
+                os.environ["XDG_RUNTIME_DIR"] = self._prev
+        self.addCleanup(restore)
+
+    def test_a_fresh_process_sees_what_the_last_one_recorded(self):
+        core._save_sweep_state(3, 1234.0)
+        self.assertEqual(core._load_sweep_state(), (3, 1234.0))
+
+    def test_no_state_yet_starts_the_budget_at_zero(self):
+        self.assertEqual(core._load_sweep_state(), (0, 0.0))
+
+    def test_unreadable_state_is_not_an_exception(self):
+        # It is diagnostic bookkeeping. Failing to read it must never stop a
+        # daemon from starting.
+        path = core._sweep_state_path()
+        with open(path, "w") as handle:
+            handle.write("{not json")
+        self.assertEqual(core._load_sweep_state(), (0, 0.0))
+
+    def test_a_restart_loop_does_not_sweep_every_time(self):
+        # Four eager attempts are spent, then the clock governs -- so the
+        # fifth restart, seconds later, must not sweep.
+        core._save_sweep_state(4, 10_000.0)
+        attempts, last = core._load_sweep_state()
+        self.assertFalse(core._should_sweep(attempts + 1, now=10_009.0,
+                                            last_sweep=last))
+
+    def test_a_reconnect_clears_the_budget_for_the_next_outage(self):
+        core._save_sweep_state(7, 10_000.0)
+        core._clear_sweep_state()
+        self.assertEqual(core._load_sweep_state(), (0, 0.0))

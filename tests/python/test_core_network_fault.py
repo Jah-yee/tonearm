@@ -17,6 +17,8 @@ sys.path.insert(0, os.path.abspath(
 
 from tonearm_lib import core   # noqa: E402
 
+import fakes  # noqa: E402
+
 
 class FakeSocket:
     def __init__(self, connected=True):
@@ -61,7 +63,15 @@ def drop(s):
         s._check_connection()
 
 
-class TestTheWatcherNamesTheRightFault(unittest.TestCase):
+class _RuntimeIsolated(unittest.TestCase):
+    """The sweep budget lives in $XDG_RUNTIME_DIR now (#33), so these must not
+    write the live daemon's. See fakes.isolate_runtime_dir."""
+
+    def setUp(self):
+        fakes.isolate_runtime_dir(self)
+
+
+class TestTheWatcherNamesTheRightFault(_RuntimeIsolated):
 
     def test_a_reachable_gateway_still_blames_the_core(self):
         s, _ = session()
@@ -106,10 +116,11 @@ class TestTheWatcherNamesTheRightFault(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
-class TestTheFaultIsReassessed(unittest.TestCase):
+class TestTheFaultIsReassessed(_RuntimeIsolated):
     """A fault that changes character while the socket stays down."""
 
     def setUp(self):
+        super().setUp()   # runtime isolation; see _RuntimeIsolated
         # These tests poll past RELOCATE_SAMPLES, which is where the watcher
         # looks for a moved Core. Without this stub that is real multicast on
         # the real network, in a unit test: slow, and answered by whatever
@@ -154,7 +165,7 @@ class TestTheFaultIsReassessed(unittest.TestCase):
         self.assertEqual(len(published), before)
 
 
-class TestRecoveryStillWorks(unittest.TestCase):
+class TestRecoveryStillWorks(_RuntimeIsolated):
 
     def test_a_network_fault_recovers_when_the_socket_returns(self):
         # The watcher ignores any status outside the set it owns, so adding
@@ -170,7 +181,7 @@ class TestRecoveryStillWorks(unittest.TestCase):
         self.assertEqual(s.status, "ok")
 
 
-class TestStartNamesTheRightFault(unittest.TestCase):
+class TestStartNamesTheRightFault(_RuntimeIsolated):
 
     def _start_failing(self, verdict):
         """start() with every connect refused and no relocated Core."""
@@ -208,7 +219,7 @@ if __name__ == "__main__":
     unittest.main()
 
 
-class TestTheFaultIsOnlyNamedWhenItIsKnown(unittest.TestCase):
+class TestTheFaultIsOnlyNamedWhenItIsKnown(_RuntimeIsolated):
     """#11: the old discriminator blamed the network on healthy networks.
 
     It asked whether the default gateway answered TCP, and plenty of healthy

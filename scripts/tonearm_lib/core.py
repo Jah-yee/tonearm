@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "vendor"))
 
 from roonapi import RoonApi              # noqa: E402  (vendored, path-inserted)
 
-from . import browse, config, net, sood, state, zones  # noqa: E402
+from . import browse, config, net, server, sood, state, zones  # noqa: E402
 
 LOG = logging.getLogger("tonearmd.core")
 
@@ -261,7 +261,15 @@ RELOCATE_SAMPLES = int(RELOCATE_AFTER / POLL_INTERVAL)
 MAX_REPORTED_NOTES = 32
 
 SWEEP_EAGER_WINDOWS = 4
-SWEEP_BACKOFF_WINDOWS = 8
+
+# Shortest gap between sweeps once the eager attempts are spent. A DURATION,
+# not a count of attempts (#33): attempts do not arrive at a fixed rate. A
+# watcher window is RELOCATE_AFTER apart, but `start()` exits when it cannot
+# reach the Core and the unit restarts it every few seconds forever, so the
+# same count means eight minutes in one regime and forty seconds in the
+# other. Only the clock means the same thing in both. Roughly the old "every
+# eighth window" at the watcher's cadence.
+SWEEP_BACKOFF_SECONDS = 8 * RELOCATE_AFTER
 
 
 def _unreachable_status(host=None) -> str:
@@ -281,20 +289,73 @@ def _unreachable_status(host=None) -> str:
     return "unreachable"
 
 
-def _should_sweep(window: int) -> bool:
-    """May this relocation window pay for the /24 sweep?
+def _should_sweep(attempt: int, now: float, last_sweep: float) -> bool:
+    """May this relocation attempt pay for the /24 sweep?
 
-    `window` counts consecutive relocation attempts that did not RESOLVE --
-    not ones where discovery came back empty. The difference matters: a config
-    carrying an identity no Core can match makes every sweep succeed at
-    discovery and every adoption fail, so counting empty results would reset
-    forever and sweep every window against a fault no sweep can fix.
+    `attempt` counts consecutive tries that did not RESOLVE -- not ones where
+    discovery came back empty. The difference matters: a config carrying an
+    identity no Core can match makes every sweep succeed at discovery and
+    every adoption fail, so counting empty results would reset forever and
+    sweep against a fault no sweep can fix.
+
+    The first few are eager regardless of the clock, because the sweep is only
+    about half reliable on the network this was measured on and a coin flip is
+    not improved by waiting between throws. After that the CLOCK decides, for
+    the reason SWEEP_BACKOFF_SECONDS gives.
+
+    A clock that has gone backwards -- suspend/resume, an NTP step -- reads as
+    "not long enough ago" rather than as permission to sweep.
     """
-    if window < 1:
+    if attempt < 1:
         return False
-    if window <= SWEEP_EAGER_WINDOWS:
+    if attempt <= SWEEP_EAGER_WINDOWS:
         return True
-    return (window - SWEEP_EAGER_WINDOWS) % SWEEP_BACKOFF_WINDOWS == 0
+    elapsed = now - last_sweep
+    return 0 <= elapsed and elapsed >= SWEEP_BACKOFF_SECONDS
+
+
+def _sweep_state_path() -> str:
+    """Where the sweep budget lives between processes.
+
+    The runtime directory: writable inside the unit's sandbox, already the
+    socket's home, and cleared on logout -- about the right lifetime for "am
+    I in the middle of an outage". Deliberately NOT the config directory,
+    which survives reboots and is backed up; this is bookkeeping, not state a
+    user would miss.
+    """
+    return os.path.join(server.runtime_dir(), "sweep")
+
+
+def _load_sweep_state() -> tuple[int, float]:
+    """(attempts, last_sweep), or (0, 0.0) when there is nothing to read.
+
+    Never raises. This is diagnostic bookkeeping, and failing to read it must
+    not be a reason a daemon does not start.
+    """
+    try:
+        with open(_sweep_state_path()) as handle:
+            data = json.load(handle)
+        return int(data["attempts"]), float(data["last_sweep"])
+    except Exception:
+        return 0, 0.0
+
+
+def _save_sweep_state(attempts: int, last_sweep: float) -> None:
+    """Record the budget. Never raises, for the same reason as the read."""
+    try:
+        os.makedirs(server.runtime_dir(), exist_ok=True)
+        with open(_sweep_state_path(), "w") as handle:
+            json.dump({"attempts": attempts, "last_sweep": last_sweep}, handle)
+    except Exception:
+        LOG.debug("could not record the sweep budget", exc_info=True)
+
+
+def _clear_sweep_state() -> None:
+    """Forget the budget: this outage is over."""
+    try:
+        os.unlink(_sweep_state_path())
+    except OSError:
+        pass
 
 
 def _relocation_candidates(cfg: dict, cores: list[dict]) -> tuple[list[dict], str]:
@@ -437,9 +498,6 @@ class RoonSession:
         # changing LAN could otherwise accumulate one entry per address seen.
         # Clearing costs at most one repeated line.
         self._reported_notes: set[str] = set()
-        # Consecutive relocation windows that did not resolve, which is what
-        # the sweep backoff is measured in.
-        self._unresolved_windows = 0
         # Set by `_apply`, cleared by `_save_cfg`: an address taken in memory
         # that no Core has answered on yet.
         self._cfg_dirty = False
@@ -604,19 +662,33 @@ class RoonSession:
     def _find_relocated(self) -> dict | None:
         """Is this Core answering at a NEW address? Returns it, or None.
 
-        Multicast only (`sood.discover(scan=False)`): the /24 sweep is 254 TCP
-        connects on a typical LAN and this runs on every restart for as long as
-        a Core stays switched off, which is not a thing to point at someone
-        else's network. A Core that has MOVED is up and answering SOOD anyway;
-        one that answers nothing is off, and no amount of scanning finds it.
+        Multicast first, falling back to the /24 sweep on the attempts
+        `_should_sweep` allows. It was multicast ONLY until #17, on the
+        premise that a Core which has moved is up and answering SOOD anyway --
+        measured false: multicast answered 0 of 7 attempts on a real network
+        while the sweep found the Core 3 times in 6.
+
+        The sweep is 254 TCP connects and this runs for as long as a Core
+        stays switched off, which is not a thing to point at someone else's
+        network on a loop. Hence the budget, which lives on disk rather than
+        in this object because the process exits and is restarted through
+        exactly that outage (#33).
 
         Reads nothing and writes nothing beyond the log: the callers decide.
         """
         # scan=True means "multicast, and sweep only if it is silent" -- the
         # sweep is never paid when multicast answers.
-        window = self._unresolved_windows + 1
+        # Read from disk, not from self: this process is built to die. `start()`
+        # exits when it cannot reach the Core and the unit restarts it every
+        # few seconds forever, so an in-memory counter is always at its first,
+        # eager attempt and every restart swept the LAN (#33).
+        attempts, last_sweep = _load_sweep_state()
+        attempt = attempts + 1
+        sweeping = _should_sweep(attempt, time.time(), last_sweep)
+        if sweeping:
+            last_sweep = time.time()
         try:
-            cores = sood.discover(scan=_should_sweep(window))
+            cores = sood.discover(scan=sweeping)
         except Exception:
             # Best effort, and broad on purpose. On the watcher thread an
             # escape would kill the poll loop; in `start()` it would turn a
@@ -632,7 +704,7 @@ class RoonSession:
             # Cleared so a refusal AFTER a successful move is reported afresh
             # rather than suppressed as a repeat of one from before it.
             self._reported_notes.clear()
-            self._unresolved_windows = 0
+            _clear_sweep_state()
             return found
         # Logged on CHANGE, not per call. This runs on every restart and on
         # every watcher poll, so an unconditional warning would repeat for the
@@ -645,7 +717,7 @@ class RoonSession:
             if len(self._reported_notes) >= MAX_REPORTED_NOTES:
                 self._reported_notes.clear()
             self._reported_notes.add(note)
-        self._unresolved_windows = window
+        _save_sweep_state(attempt, last_sweep)
         return None
 
     def _watch_connection(self) -> None:
@@ -699,7 +771,17 @@ class RoonSession:
         both retry the same way.
         """
         if not self._cfg.get("host"):
-            cores = sood.discover()
+            # Budgeted like the relocation sweep, and for the same reason
+            # (#33). On a genuine first run this is attempt 1, so it sweeps
+            # with a human waiting, which is the case `discover`'s docstring
+            # calls a fair price. But an unpaired daemon with no Core to find
+            # exits and is restarted every few seconds forever, and without a
+            # budget every one of those restarts swept the LAN again.
+            attempts, last_sweep = _load_sweep_state()
+            attempt = attempts + 1
+            sweeping = _should_sweep(attempt, time.time(), last_sweep)
+            _save_sweep_state(attempt, time.time() if sweeping else last_sweep)
+            cores = sood.discover(scan=sweeping)
             if not cores:
                 self._status = _unreachable_status(self._cfg.get('host'))
                 self._publish()

@@ -1,5 +1,66 @@
 """Test doubles. FakeRoon replays the level structure measured on yavin."""
 
+import os
+import sys
+import tempfile
+import unittest.mock
+
+sys.path.insert(0, os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "scripts")))
+
+from tonearm_lib import core  # noqa: E402
+
+
+def silence_watcher(testcase):
+    """Stop a successful `start()` leaving a watcher thread behind.
+
+    `start()` spawns `conn-watch` as `daemon=True` with no stop flag, on the
+    stated grounds that "a watcher that outlives its own session by one poll
+    is harmless". In a test process it outlives the whole SUITE: three of them
+    were still polling after the last test, long after the cleanup that
+    restored $XDG_RUNTIME_DIR -- so they wrote the sweep budget (#33) into the
+    live daemon's runtime directory, which no single test module reproduced
+    because it only shows up over a long run.
+
+    Patched here rather than given a stop flag in production: the tests that
+    trip this are asserting what `start()` decides, not that a watcher runs,
+    and none of them assert on the thread at all.
+    """
+    patcher = unittest.mock.patch.object(
+        core.RoonSession, "_watch_connection", lambda _self: None)
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+
+
+def isolate_runtime_dir(testcase):
+    """Point $XDG_RUNTIME_DIR at a scratch directory for one test.
+
+    Required by anything that reaches `core._find_relocated` or `start()`,
+    because #33 moved the sweep budget out of the process and into
+    `$XDG_RUNTIME_DIR/tonearm` -- so without this, tests read and WRITE the
+    live daemon's runtime directory. That was caught the hard way: a test run
+    left `{"attempts": 25}` beside the running daemon's socket, which then
+    read as "this outage is old, do not sweep" for the daemon as well as for
+    the next test.
+
+    Shared rather than repeated, because three test modules need it and the
+    fourth will not think to.
+    """
+    silence_watcher(testcase)
+    tmp = tempfile.TemporaryDirectory()
+    testcase.addCleanup(tmp.cleanup)
+    previous = os.environ.get("XDG_RUNTIME_DIR")
+    os.environ["XDG_RUNTIME_DIR"] = tmp.name
+    os.makedirs(os.path.join(tmp.name, "tonearm"), exist_ok=True)
+
+    def restore():
+        if previous is None:
+            os.environ.pop("XDG_RUNTIME_DIR", None)
+        else:
+            os.environ["XDG_RUNTIME_DIR"] = previous
+    testcase.addCleanup(restore)
+    return tmp.name
+
 
 class FakeRoon:
     """Minimal stand-in for RoonApi's browse surface.

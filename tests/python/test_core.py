@@ -34,6 +34,8 @@ sys.path.insert(0, os.path.abspath(
 
 from tonearm_lib import config, core
 
+import fakes  # noqa: E402
+
 
 class TestConnectTimeout(unittest.TestCase):
     """`_connect_timeout()` picks the per-port connect budget: a long one
@@ -125,6 +127,9 @@ class TestRawZones(unittest.TestCase):
         self._prev_config_home = os.environ.get("XDG_CONFIG_HOME")
         os.environ["XDG_CONFIG_HOME"] = self.tmp.name
         config.reset_paths()
+        # See fakes.isolate_runtime_dir: the sweep budget lives in the runtime
+        # directory now, and without this these tests write the live one.
+        fakes.isolate_runtime_dir(self)
         self.addCleanup(self._restore_config_home)
 
     def _restore_config_home(self):
@@ -212,6 +217,12 @@ class TestStartRetriesByExiting(unittest.TestCase):
 
     def setUp(self):
         _assume_lan_is_fine(self)
+        # Two tests here let start() SUCCEED, which spawns the conn-watch
+        # thread: daemon=True with no stop flag, so it outlives this test and
+        # every one after it, and once cleanup restores $XDG_RUNTIME_DIR it
+        # writes the sweep budget (#33) into the live daemon's runtime
+        # directory. See fakes.isolate_runtime_dir.
+        fakes.isolate_runtime_dir(self)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self._prev_config_home = os.environ.get("XDG_CONFIG_HOME")
