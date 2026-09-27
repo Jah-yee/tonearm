@@ -4,6 +4,53 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.12.0 — 2026-09-27
+
+Minor rather than patch: `setup.sh` gains a command-line surface it did not
+have. Nothing breaks — the new flags are optional and the daemon's behaviour
+is unchanged without them — but a new way to install is not a bug fix.
+
+### Added
+
+- **`setup.sh --core HOST [--http-port PORT] [--tcp-port PORT]`**
+  ([#12](https://github.com/ssandys/tonearm/pull/12), thanks
+  @cbayschm74). Some installations reach their Core but never receive a SOOD
+  discovery answer, so first-run setup never reaches the authorization step.
+  That is not hypothetical: measured here, multicast answered 0 of 7 attempts
+  on a Wi-Fi network — including four 12-second windows — while a unicast
+  probe to the same Core answered. It is ordinary consumer-AP behaviour
+  toward wireless clients.
+
+  The address is validated and persisted through the existing
+  descriptor-relative, atomic, mode-0600 config writer, so the shell script
+  never hand-writes JSON, and it runs before the unit is touched, so bad
+  input cannot enable a service.
+
+  Deliberately narrow: a *different* configured Core is refused, because
+  deciding whether a pairing token belongs to a replacement is a separate
+  question ([#16](https://github.com/ssandys/tonearm/issues/16)), and IPv6
+  literals are refused because the Core and art URL builders do not bracket
+  them.
+
+### Fixed
+
+- **The LAN sweep budget survives a restart**
+  ([#33](https://github.com/ssandys/tonearm/issues/33)). The budget added in
+  0.11.5 was a counter in memory, and this process is built to die: the
+  daemon exits when it cannot reach the Core and systemd restarts it every
+  few seconds. Every restart therefore began at the first, eager attempt, so
+  a switched-off Core had the LAN scanned every few seconds indefinitely —
+  the exact repetition the budget exists to prevent, arriving by the one path
+  it could not see.
+
+  The bound is now a duration rather than a count of attempts, because
+  attempts do not arrive at a fixed rate: a watcher window is two minutes
+  apart while a restart loop arrives every few seconds. The first few
+  attempts stay eager regardless of the clock, since the sweep is only about
+  half reliable and a coin flip is not improved by waiting between throws.
+  The unpaired first-run scan is budgeted the same way, and still sweeps
+  immediately on a genuine first run with someone waiting.
+
 ## 0.11.7 — 2026-09-24
 
 ### Fixed
