@@ -4,6 +4,7 @@ import random
 import struct
 import sys
 import unittest
+from unittest.mock import patch
 import unittest.mock
 
 sys.path.insert(0, os.path.abspath(
@@ -317,3 +318,82 @@ class TestScanBudget(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _tlv(key, value):
+    k = key.encode(); v = value.encode()
+    return bytes([len(k)]) + k + struct.pack(">H", len(v)) + v
+
+
+def _reply(**fields):
+    body = b"".join(_tlv(k, v) for k, v in fields.items())
+    return b"SOOD" + b"\x02" + b"R" + body
+
+
+class TestOnlyRepliesToOurQueryAreAccepted(unittest.TestCase):
+    """#34: `parse` checked the magic and ignored everything else.
+
+    A frame's type byte says whether it is a query or a reply, and the
+    service_id says whose protocol it is. Neither was looked at, so our own
+    broadcast query -- which every host on the segment receives -- parsed as
+    a Core, as did any unrelated SOOD-shaped traffic.
+
+    NOT gated on a transaction id, although the report suggested it. Measured
+    against a live Core: a query carrying `_tid: abc123deadbeef` came back
+    with `_tid: bf97ab4b-acbd-1a7d-92e0-ca03cced1dbd`. The Core sends its own
+    id and does not echo ours, so requiring a match would reject every reply
+    in existence and disable discovery altogether.
+    """
+
+    def test_a_reply_still_parses(self):
+        self.assertEqual(
+            sood.parse(_reply(service_id=sood.SERVICE_ID, name="yavin"))["name"],
+            "yavin")
+
+    def test_our_own_query_is_not_a_core(self):
+        # The query goes to 239.255.90.90 and to the broadcast address, so
+        # this machine receives its own frame.
+        self.assertIsNone(sood.parse(sood.build_query()))
+
+    def test_another_protocols_sood_frame_is_not_a_core(self):
+        # Decoded as a frame, refused as a Core -- the split that keeps the
+        # framing tests above about framing.
+        self.assertFalse(sood.is_roon_reply(
+            sood.parse(_reply(service_id="not-roons", name="x"))))
+
+    def test_a_reply_with_no_service_id_is_not_a_core(self):
+        self.assertFalse(sood.is_roon_reply(sood.parse(_reply(name="yavin"))))
+
+    def test_a_roon_reply_is_accepted(self):
+        self.assertTrue(sood.is_roon_reply(
+            sood.parse(_reply(service_id=sood.SERVICE_ID, name="yavin"))))
+
+
+class TestDiscoveryKeepsABoundedNumberOfCores(unittest.TestCase):
+    """The receive loop kept one entry per distinct source address, uncapped.
+
+    Source addresses are trivially spoofed on a LAN, so a flood of forged
+    replies grew the dict for the whole receive window -- and `_describe_cores`
+    then joined every one of them into a single log line. The sweep path has
+    had `MAX_SCAN_HOSTS` all along; the multicast path had no counterpart.
+    """
+
+    def test_the_cap_is_enforced_and_announced(self):
+        class Flood:
+            def __init__(self): self.n = 0
+            def settimeout(self, _t): pass
+            def setsockopt(self, *_a): pass
+            def bind(self, _a): pass
+            def sendto(self, *_a): pass
+            def close(self): pass
+            def recvfrom(self, _n):
+                self.n += 1
+                return (_reply(service_id=sood.SERVICE_ID, name="c%d" % self.n),
+                        ("10.0.0.%d" % (self.n % 250), 9003))
+
+        with patch.object(sood.socket, "socket", lambda *a, **k: Flood()), \
+             self.assertLogs(sood.LOG, level="WARNING") as logged:
+            found = sood.discover(timeout=0.3, scan=False)
+        self.assertLessEqual(len(found), sood.MAX_DISCOVERED_CORES)
+        self.assertTrue(any("cores" in line.lower() for line in logged.output),
+                        logged.output)

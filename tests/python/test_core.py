@@ -34,6 +34,12 @@ sys.path.insert(0, os.path.abspath(
 
 from tonearm_lib import config, core
 
+# `unittest discover -t .` imports these as tests.python.*, and its
+# top-level-dir sys.path insertion does not make sibling modules importable
+# bare. Add this file's own directory so `import fakes` resolves the same
+# whether the suite is run by discovery or by module name.
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 import fakes  # noqa: E402
 
 

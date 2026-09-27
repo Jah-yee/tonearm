@@ -260,6 +260,12 @@ RELOCATE_SAMPLES = int(RELOCATE_AFTER / POLL_INTERVAL)
 # LAN can vary without limit.
 MAX_REPORTED_NOTES = 32
 
+# Cores named in one relocation note, and how much of a Core's name is shown.
+# The name comes from the network, so both are ceilings rather than taste:
+# without them the line's length is whatever a flood of replies makes it.
+MAX_DESCRIBED_CORES = 4
+MAX_CORE_NAME = 40
+
 SWEEP_EAGER_WINDOWS = 4
 
 # Shortest gap between sweeps once the eager attempts are spent. A DURATION,
@@ -376,9 +382,20 @@ def _relocation_candidates(cfg: dict, cores: list[dict]) -> tuple[list[dict], st
 
 
 def _describe_cores(cores: list[dict]) -> str:
-    """Cores as a reader needs them: the name to recognise, the address to try."""
-    return ", ".join("%s at %s" % (c.get("name") or "?", c.get("host"))
-                     for c in cores)
+    """Cores as a reader needs them: the name to recognise, the address to try.
+
+    Truncated, because the length of this string was set by what the network
+    said (#34). Discovery is bounded now too, but a log line that grows with
+    the number of replies received is worth closing on its own side as well:
+    the first few are what a reader acts on, and the count is what tells them
+    something is wrong.
+    """
+    shown = [c for c in cores[:MAX_DESCRIBED_CORES]]
+    text = ", ".join("%s at %s" % ((c.get("name") or "?")[:MAX_CORE_NAME],
+                                   c.get("host"))
+                     for c in shown)
+    extra = len(cores) - len(shown)
+    return "%s (+%d more)" % (text, extra) if extra > 0 else text
 
 
 def _relocation_note(cfg: dict, cores: list[dict]) -> str | None:

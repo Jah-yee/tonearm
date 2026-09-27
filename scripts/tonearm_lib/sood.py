@@ -57,6 +57,14 @@ MAX_SCAN_HOSTS = 512
 # the persisted zone id in core._pin_locked.
 MAX_SOOD_FIELD = 256
 
+# Cores kept from one multicast window. A ceiling on what a client can make
+# this hold, not a tuning knob (#34): source addresses are trivially spoofed
+# on a LAN, so without it a flood of forged replies grows the dict for the
+# whole receive window and every one of them reaches the caller. A real LAN
+# has one Core, or a handful. The scan path has had MAX_SCAN_HOSTS all along;
+# this is the multicast counterpart.
+MAX_DISCOVERED_CORES = 16
+
 
 def _tlv(key: str, value: str) -> bytes:
     kb, vb = key.encode(), value.encode()
@@ -73,7 +81,17 @@ def parse(buf: bytes) -> dict | None:
     Never raises on a malformed body: callers treat an exception as "no Core",
     so a single bad byte would otherwise discard a real response.
     """
-    if len(buf) < 6 or buf[:4] != b"SOOD":
+    # Magic, then TYPE. Only the magic was checked
+    # until #34, so our own broadcast query -- which this machine receives,
+    # since the query goes to the broadcast address as well as the multicast
+    # group -- parsed as a Core, and so did any unrelated SOOD-shaped traffic.
+    #
+    # Deliberately NOT gated on a transaction id, although that was suggested:
+    # measured against a live Core, a query carrying `_tid: abc123deadbeef`
+    # came back carrying `_tid: bf97ab4b-acbd-1a7d-92e0-ca03cced1dbd`. Cores
+    # send their own id rather than echoing ours, so requiring a match would
+    # reject every reply there is.
+    if len(buf) < 6 or buf[:4] != b"SOOD" or buf[5:6] != b"R":
         return None
     out: dict[str, str] = {}
     i = 6  # "SOOD" + version byte + type byte
@@ -101,6 +119,17 @@ def parse(buf: bytes) -> dict | None:
             out[key] = buf[i:i + vlen].decode("utf-8", "replace")
         i += vlen
     return out
+
+
+def is_roon_reply(raw) -> bool:
+    """Does a decoded frame name Roon's own service?
+
+    Separate from `parse` on purpose. Decoding a frame and deciding whether we
+    want it are different questions, and folding the second into the first
+    made every framing test -- truncation, oversized fields, trailing garbage
+    -- depend on carrying a service_id they were not about.
+    """
+    return bool(raw) and raw.get("service_id") == SERVICE_ID
 
 
 def _int(raw: dict, key: str, default: int) -> int:
@@ -133,7 +162,7 @@ def _probe_unicast(host: str, timeout: float = 1.5) -> dict | None:
     finally:
         sock.close()
     raw = parse(buf)
-    return to_core(host, raw, via="scan") if raw else None
+    return to_core(host, raw, via="scan") if is_roon_reply(raw) else None
 
 
 def _local_ipv4() -> str | None:
@@ -278,7 +307,12 @@ def discover(timeout: float = 6.0, scan: bool = True) -> list[dict]:
         except OSError:
             break
         raw = parse(buf)
-        if raw and addr[0] not in found:
+        if is_roon_reply(raw) and addr[0] not in found:
+            if len(found) >= MAX_DISCOVERED_CORES:
+                LOG.warning(
+                    "keeping the first %d cores discovered by multicast and "
+                    "ignoring the rest of this window", MAX_DISCOVERED_CORES)
+                break
             found[addr[0]] = to_core(addr[0], raw, via="multicast")
     sock.close()
 

@@ -29,6 +29,12 @@ sys.path.insert(0, os.path.abspath(
 
 from tonearm_lib import config   # noqa: E402
 
+# `unittest discover -t .` imports these as tests.python.*, and its
+# top-level-dir sys.path insertion does not make sibling modules importable
+# bare. Add this file's own directory so `import fakes` resolves the same
+# whether the suite is run by discovery or by module name.
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+
 import fakes  # noqa: E402
 from tonearm_lib import core     # noqa: E402
 
@@ -752,3 +758,35 @@ class TestTheSweepBudgetSurvivesARestart(unittest.TestCase):
         core._save_sweep_state(7, 10_000.0)
         core._clear_sweep_state()
         self.assertEqual(core._load_sweep_state(), (0, 0.0))
+
+
+class TestARelocationNoteIsBounded(unittest.TestCase):
+    """#34: the note listed every Core discovery returned, in one line.
+
+    `MAX_REPORTED_NOTES` caps how many distinct notes are remembered, not how
+    long one is. Discovery is now bounded too (sood.MAX_DISCOVERED_CORES), so
+    this is the second of two bounds rather than the only one -- but a log
+    line whose length is set by what the network said is worth closing on its
+    own side as well.
+    """
+
+    def _cores(self, n):
+        return [{"name": "core-%02d" % i, "host": "10.0.0.%d" % i,
+                 "tcp_port": 9150, "http_port": 9330, "unique_id": "u%d" % i}
+                for i in range(n)]
+
+    def test_a_short_list_is_named_in_full(self):
+        text = core._describe_cores(self._cores(2))
+        self.assertIn("core-00", text)
+        self.assertIn("core-01", text)
+        self.assertNotIn("more", text)
+
+    def test_a_long_list_is_truncated_and_says_how_many_it_dropped(self):
+        text = core._describe_cores(self._cores(12))
+        self.assertIn("core-00", text)
+        self.assertNotIn("core-11", text)
+        self.assertIn("more", text)
+
+    def test_the_line_cannot_grow_without_limit(self):
+        # The property that matters: whatever the network says, this is short.
+        self.assertLess(len(core._describe_cores(self._cores(500))), 400)
