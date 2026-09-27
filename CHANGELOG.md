@@ -4,6 +4,30 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.12.1 — 2026-09-27
+
+### Fixed
+
+- **Discovery keeps a bounded number of Cores, and says less about them**
+  ([#34](https://github.com/ssandys/tonearm/issues/34)). Multicast discovery
+  kept one entry per distinct source address for the whole receive window,
+  with no limit. Source addresses are trivially spoofed on a LAN, so a flood
+  of forged replies grew that list without bound — and the relocation log
+  line then named every one of them. Discovery now keeps at most sixteen and
+  reports once when it stops; the log line names at most four and counts the
+  rest.
+
+- **Only Roon's own replies are treated as Cores.** Frames were accepted on
+  their magic bytes alone, so tonearm's own broadcast query — which the
+  machine receives, since the query goes to the broadcast address as well as
+  the multicast group — was read back as a Core, as was any unrelated
+  SOOD-shaped traffic. Replies must now carry the reply type and name Roon's
+  service.
+
+  Deliberately not gated on a transaction id: measured against a live Core, a
+  query carrying one came back carrying the Core's own instead, so requiring
+  a match would reject every reply there is.
+
 ## 0.12.0 — 2026-09-27
 
 Minor rather than patch: `setup.sh` gains a command-line surface it did not
