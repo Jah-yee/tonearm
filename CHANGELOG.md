@@ -4,6 +4,47 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.13.0 — 2026-10-01
+
+Minor rather than patch: `setup.sh` gains another command, there is a new
+setting, and remote commands behave differently while the Core is
+disconnected. Nothing breaks, but none of it is invisible either.
+
+Both changes came from outside, with thanks to @cbayschm74.
+
+### Added
+
+- **`setup.sh --uninstall`**
+  ([#18](https://github.com/ssandys/tonearm/pull/18)). Removing the plugin
+  before its systemd service left an enabled unit pointing at a path that no
+  longer existed, which retried forever — seen on a real install. The command
+  stops, disables and removes the service, and is safe to repeat. It checks
+  the unit belongs to tonearm before stopping anything, refuses a symlinked
+  or unowned one, and leaves your Core address, pairing token and pinned zone
+  alone.
+
+  It needs only `systemctl`, so it still works on a machine missing the
+  daemon's Python dependencies. The unit also skips starting when its daemon
+  path has gone — which helps installs that upgrade first, and cannot help
+  one already broken, since `setup.sh` went with the plugin. The README
+  covers that case separately.
+
+- **Optional strict pinning**
+  ([#43](https://github.com/ssandys/tonearm/pull/43)). Pin a zone, power that
+  endpoint off, press pause, and tonearm would pause a different room — the
+  selection quietly fell back to whatever else was active, with nothing
+  saying so. Setting `"strict_pins": true` in `~/.config/tonearm/config.json`
+  leaves no zone selected instead, refuses controls that would target one,
+  and keeps the pin for the endpoint's return. Off by default, so nothing
+  changes unless you ask for it.
+
+### Changed
+
+- **Commands are refused while the Core is disconnected**, regardless of the
+  setting above, and cached zones are no longer offered as playback targets.
+  A command sent through a connection already known to be down is how one
+  arrives minutes later against a zone you have since changed.
+
 ## 0.12.2 — 2026-09-27
 
 Two hardening fixes from a security review of the whole codebase.
