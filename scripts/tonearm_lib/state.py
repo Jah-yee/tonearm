@@ -28,11 +28,62 @@ MAX_TEXT = 512
 # length keeps that decision from being unbounded work per push.
 MAX_ZONES = 64
 
+# Identifiers, not labels: zone_id, image_key, core.host. Bounded separately
+# and much shorter, because these are not prose -- a real Roon zone id is 36
+# characters and an image key 32. They are CLIPPED rather than dropped only
+# because dropping a zone's id would remove the zone from the picker
+# entirely; a clipped id addresses nothing, which fails closed.
+MAX_ID = 128
+
+# The state word: "playing", "paused", "stopped", "loading". Nothing legitimate
+# is longer, and Model.js only ever compares it.
+MAX_STATE = 32
+
+# Positions, lengths and volume steps, in whatever unit the Core used. Values
+# outside this are not real and are the ones that hurt: mpris.py multiplies
+# position and length by 1_000_000, so an unbounded value becomes an
+# unbounded allocation (#21).
+MAX_NUMBER = 2 ** 31
+
 
 def _clip(value) -> str:
     """Core-supplied text, bounded, never None."""
     text = str(value or "")
     return text[:MAX_TEXT]
+
+
+def _ident(value) -> str:
+    """A Core-supplied identifier, bounded and always a string.
+
+    `str()` rather than a type check, so a Core sending a dict or a list for
+    `image_key` yields a harmless string instead of a TypeError deep in the
+    art cache -- which took out every snapshot, and with it every subscribe,
+    status reply and broadcast (#28).
+    """
+    return str(value if value is not None else "")[:MAX_ID]
+
+
+def _state_word(value) -> str:
+    return str(value if value is not None else "stopped")[:MAX_STATE]
+
+
+def _number(value, default=0):
+    """A Core-supplied number, or `default` when it is not one.
+
+    bool is refused before int because `isinstance(True, int)` is true, and a
+    volume of True is not a volume. Non-finite values are refused too: NaN and
+    Infinity survive json.loads, and reach int() in mpris.py as ValueError or
+    OverflowError rather than as a number.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return default
+    if value != value or value in (float("inf"), float("-inf")):
+        return default
+    if value > MAX_NUMBER:
+        return MAX_NUMBER
+    if value < -MAX_NUMBER:
+        return -MAX_NUMBER
+    return value
 
 
 def _volume_of(roon_zone: dict) -> dict | None:
@@ -52,10 +103,10 @@ def _volume_of(roon_zone: dict) -> dict | None:
         # would be a lie, so the widget is told there is nothing to show.
         return None
     return {
-        "value": raw.get("value", 0),
-        "min": raw.get("min", 0),
-        "max": raw.get("max", 100),
-        "step": raw.get("step", 1),
+        "value": _number(raw.get("value"), 0),
+        "min": _number(raw.get("min"), 0),
+        "max": _number(raw.get("max"), 100),
+        "step": _number(raw.get("step"), 1),
         "muted": bool(raw.get("is_muted", False)),
     }
 
@@ -69,7 +120,7 @@ def _now_playing_of(roon_zone: dict) -> dict | None:
         "title": _clip(lines.get("line1", "")),
         "artist": _clip(lines.get("line2", "")),
         "album": _clip(lines.get("line3", "")),
-        "image_key": np.get("image_key", ""),
+        "image_key": _ident(np.get("image_key", "")),
         # Nullable placeholder: this module does no I/O (see the module
         # docstring), so it cannot know whether a local cached copy exists.
         # The daemon's art cache (art.py) fills this in, or leaves it null.
@@ -100,7 +151,7 @@ def _seek_of(roon_zone: dict, np: dict) -> int:
     pos = roon_zone.get("seek_position")
     if pos is None:
         pos = np.get("seek_position")
-    return pos or 0
+    return _number(pos, 0)
 
 
 def normalize_zone(roon_zone: dict | None) -> dict | None:
@@ -108,13 +159,13 @@ def normalize_zone(roon_zone: dict | None) -> dict | None:
         return None
     np = roon_zone.get("now_playing") or {}
     return {
-        "id": roon_zone.get("zone_id", ""),
+        "id": _ident(roon_zone.get("zone_id", "")),
         "name": _clip(roon_zone.get("display_name", "")),
-        "state": roon_zone.get("state", "stopped"),
+        "state": _state_word(roon_zone.get("state", "stopped")),
         "pinned": False,          # the daemon overwrites this; see zones.py
         "volume": _volume_of(roon_zone),
         "position": _seek_of(roon_zone, np),
-        "length": np.get("length") or 0,
+        "length": _number(np.get("length"), 0),
         "now_playing": _now_playing_of(roon_zone),
     }
 
@@ -126,8 +177,8 @@ def build(status: str, core: dict | None, zone: dict | None,
     trimmed_core = None
     if core:
         trimmed_core = {
-            "host": core.get("host", ""),
-            "http_port": core.get("http_port", 9330),
+            "host": _ident(core.get("host", "")),
+            "http_port": _number(core.get("http_port"), 9330),
             "name": _clip(core.get("name", "")),
         }
     return {
@@ -138,8 +189,8 @@ def build(status: str, core: dict | None, zone: dict | None,
         # Sent in full on every push. It is small, and always sending it removes
         # a class of staleness bug rather than trading it for bytes.
         "zones": [
-            {"id": z.get("id", ""), "name": _clip(z.get("name", "")),
-             "state": z.get("state", "stopped")}
+            {"id": _ident(z.get("id", "")), "name": _clip(z.get("name", "")),
+             "state": _state_word(z.get("state", "stopped"))}
             for z in zones[:MAX_ZONES]
         ],
     }

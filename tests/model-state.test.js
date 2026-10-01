@@ -308,3 +308,34 @@ test("canTransferTo is false whenever the daemon is not healthy", () => {
   stillConnecting.status = "connecting"
   assert.strictEqual(M.canTransferTo(stillConnecting, "z2"), false)
 })
+
+// --- acceptsLine -----------------------------------------------------------
+//
+// The third part of the marketplace block (2026-09-30): the relay "parses and
+// retains the entire line inside the shared shell". The daemon bounds what it
+// publishes now, but the daemon should not be the only thing standing between
+// a hostile Core and omarchy-shell -- anything able to write to the socket
+// reaches this parser, and JSON.parse on a huge line allocates before any
+// check this file could make afterwards.
+
+test("acceptsLine takes an ordinary payload", () => {
+  assert.strictEqual(M.acceptsLine(JSON.stringify(
+    { v: 1, status: "ok", core: { host: "10.0.0.1" }, zone: null, zones: [] })), true)
+})
+
+test("acceptsLine refuses a line no honest daemon would send", () => {
+  // The daemon caps its own output well below this, so anything above it did
+  // not come from a healthy tonearmd.
+  assert.strictEqual(M.acceptsLine("x".repeat(M.MAX_LINE + 1)), false)
+})
+
+test("acceptsLine refuses nothing at the boundary", () => {
+  assert.strictEqual(M.acceptsLine("x".repeat(M.MAX_LINE)), true)
+})
+
+test("acceptsLine tolerates empty and absent input", () => {
+  // Called before JSON.parse, so it must not be the thing that throws.
+  assert.strictEqual(M.acceptsLine(""), false)
+  assert.strictEqual(M.acceptsLine(null), false)
+  assert.strictEqual(M.acceptsLine(undefined), false)
+})

@@ -87,7 +87,15 @@ Item {
     command: [root.ctlPath, "subscribe"]
     stdout: SplitParser {
       onRead: function (line) {
-        if (!line || line.length === 0) return
+        // Checked BEFORE JSON.parse, which is the only order that helps: the
+        // parse is what allocates, inside omarchy-shell. The daemon bounds
+        // its own output (server.MAX_PAYLOAD_BYTES) and that is the fix; this
+        // is the second line of it, so the daemon is not the only thing
+        // between a hostile Core and the shared shell process.
+        if (!Model.acceptsLine(line)) {
+          console.warn("tonearm: refusing an oversized state line")
+          return
+        }
         var parsed = null
         try {
           parsed = JSON.parse(line)
@@ -167,7 +175,13 @@ Item {
 
       stdout: SplitParser {
         onRead: function (line) {
-          if (line && line.length > 0 && rpc.buffer === "") rpc.buffer = line
+          // Same bound as the state relay: a browse reply carries Core-supplied
+          // rows and is parsed in the same process.
+          if (!Model.acceptsLine(line)) {
+            console.warn("tonearm: refusing an oversized browse reply")
+            return
+          }
+          if (rpc.buffer === "") rpc.buffer = line
         }
       }
 

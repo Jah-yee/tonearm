@@ -641,3 +641,70 @@ class TestDeadSubscribersAreReaped(unittest.TestCase):
         for s in socks:
             self.addCleanup(s.close)
         self.assertLessEqual(self._registered(), server.MAX_SUBSCRIBERS)
+
+
+class TestThePublishedPayloadIsBounded(unittest.TestCase):
+    """The second half of the marketplace block (2026-09-30).
+
+    Bounding each field is necessary and not sufficient: the zone listing is
+    sent in full on every push, so bounded fields times MAX_ZONES still
+    multiply, and nothing measured the serialized line before handing it to a
+    socket. Every other bound in this file guards what comes IN -- the request
+    line, the session key, the search term. Nothing guarded what goes OUT, and
+    what goes out is parsed and retained inside omarchy-shell.
+
+    Degraded rather than refused. Dropping the line entirely blinds the widget,
+    which is a worse failure than a short one: the zone listing goes first
+    because it is the part that multiplies, then the selected zone, and the
+    result is always a valid v1 payload.
+    """
+
+    def _payload(self, zones):
+        return {"v": 1, "status": "ok",
+                "core": {"host": "10.0.0.1", "http_port": 9330, "name": "c"},
+                "zone": {"id": "z1", "name": "Kitchen", "state": "playing"},
+                "zones": zones}
+
+    def test_an_ordinary_payload_is_passed_through_untouched(self):
+        payload = self._payload([{"id": "z%d" % i, "name": "n", "state": "playing"}
+                                 for i in range(64)])
+        blob = server._bounded_blob(payload)
+        self.assertEqual(json.loads(blob.decode()), payload)
+
+    def test_an_oversized_payload_is_shrunk_not_sent(self):
+        payload = self._payload([{"id": "z", "name": "n" * 5000, "state": "s"}
+                                 for i in range(500)])
+        blob = server._bounded_blob(payload)
+        self.assertLessEqual(len(blob), server.MAX_PAYLOAD_BYTES)
+
+    def test_what_survives_is_still_a_valid_payload(self):
+        payload = self._payload([{"id": "z", "name": "n" * 5000, "state": "s"}
+                                 for i in range(500)])
+        out = json.loads(server._bounded_blob(payload).decode())
+        self.assertEqual(out["v"], 1)
+        self.assertEqual(out["status"], "ok")
+        self.assertIn("zones", out)
+
+    def test_the_zone_listing_is_given_up_before_the_selected_zone(self):
+        # The listing is what multiplies; the selected zone is what the bar is
+        # actually showing. Losing the picker beats losing the now-playing.
+        payload = self._payload([{"id": "z", "name": "n" * 5000, "state": "s"}
+                                 for i in range(500)])
+        out = json.loads(server._bounded_blob(payload).decode())
+        self.assertEqual(out["zones"], [])
+        self.assertIsNotNone(out["zone"])
+
+    def test_a_payload_oversized_in_its_selected_zone_still_fits(self):
+        payload = self._payload([])
+        payload["zone"] = {"id": "z1", "name": "n" * (2 * server.MAX_PAYLOAD_BYTES),
+                           "state": "playing"}
+        blob = server._bounded_blob(payload)
+        self.assertLessEqual(len(blob), server.MAX_PAYLOAD_BYTES)
+        self.assertEqual(json.loads(blob.decode())["status"], "ok")
+
+    def test_every_result_ends_in_one_newline(self):
+        # The wire format is NDJSON and the widget splits on it.
+        for zones in ([], [{"id": "z", "name": "n" * 5000, "state": "s"}] * 500):
+            blob = server._bounded_blob(self._payload(zones))
+            self.assertTrue(blob.endswith(b"\n"))
+            self.assertEqual(blob.count(b"\n"), 1)

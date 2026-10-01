@@ -62,12 +62,63 @@ MAX_SESSION_KEY = 64
 # was a round trip the daemon made a Core do on a client's say-so.
 MAX_SEARCH_TERM = 512
 
+# Longest line this daemon will put on a socket. Every other bound here guards
+# what comes IN; this is the only one guarding what goes OUT, and what goes out
+# is parsed and retained inside omarchy-shell -- the process every bar widget
+# shares. state.py bounds each Core-supplied field, but the zone listing is
+# sent in full on every push, so bounded fields still multiply by MAX_ZONES.
+# Flagged by the marketplace security review on 2026-09-30.
+#
+# A legitimate payload at the zone cap measures roughly 50 KB, so this is about
+# five times the largest honest line rather than a tight fit.
+MAX_PAYLOAD_BYTES = 256 * 1024
+
 # How often the accept loop wakes to re-check whether it should still be
 # running. Closing the listening socket does NOT interrupt another thread
 # already blocked in accept(), so without this shutdown() sets a flag nobody
 # ever reads again and the thread stays parked. It was masked in production
 # only because the thread is daemon=True and the process was exiting anyway.
 ACCEPT_POLL = 0.25
+
+
+def _bounded_blob(payload: dict) -> bytes:
+    """Serialize `payload` as one NDJSON line, never longer than the bound.
+
+    Degraded rather than refused. Dropping the line entirely blinds the widget,
+    which is a worse failure than a short one, so this gives up the parts that
+    multiply before the part the bar is actually showing: the zone listing
+    first, then the selected zone, then everything optional. The result is
+    always a valid v1 payload ending in exactly one newline.
+    """
+    blob = (json.dumps(payload) + "\n").encode()
+    if len(blob) <= MAX_PAYLOAD_BYTES:
+        return blob
+
+    LOG.warning("payload of %d bytes exceeds %d; publishing a reduced one",
+                len(blob), MAX_PAYLOAD_BYTES)
+
+    reduced = dict(payload)
+    # The listing multiplies by MAX_ZONES; the selected zone does not.
+    for key in ("zones", "rows"):
+        if key in reduced:
+            reduced[key] = []
+    blob = (json.dumps(reduced) + "\n").encode()
+    if len(blob) <= MAX_PAYLOAD_BYTES:
+        return blob
+
+    # The oversize is in what the bar is showing. Keep the shape, lose the
+    # contents, so the widget still learns the status rather than nothing.
+    for key in ("zone", "core", "path"):
+        if key in reduced:
+            reduced[key] = None
+    blob = (json.dumps(reduced) + "\n").encode()
+    if len(blob) <= MAX_PAYLOAD_BYTES:
+        return blob
+
+    # Nothing recognisable left to trim: emit the minimum that still parses.
+    return (json.dumps({"v": payload.get("v", 1),
+                        "status": payload.get("status", "ok"),
+                        "core": None, "zone": None, "zones": []}) + "\n").encode()
 
 
 class _Subscriber:
@@ -313,7 +364,7 @@ class Server:
 
         if cmd == "status":
             try:
-                conn.sendall((json.dumps(self._session.snapshot()) + "\n").encode())
+                conn.sendall(_bounded_blob(self._session.snapshot()))
             except Exception:
                 # Not only OSError. json.dumps raises TypeError on a value it
                 # cannot encode, and snapshot() raises on its own for a status
@@ -365,7 +416,7 @@ class Server:
                 reply = self._session.browse(key, op, **payload)
                 reply = dict(reply)
                 reply["v"] = 1
-                blob = (json.dumps(reply) + "\n").encode()
+                blob = _bounded_blob(reply)
             except browse.BrowseError as exc:
                 reply = {"v": 1, "ok": False, "error": exc.token,
                          "message": exc.message}
@@ -378,7 +429,7 @@ class Server:
                     # into a success one.
                     reply.update({k: v for k, v in exc.level.items()
                                   if k != "ok"})
-                blob = (json.dumps(reply) + "\n").encode()
+                blob = _bounded_blob(reply)
             except Exception:
                 # A browse failure -- including a reply that fails to
                 # serialize -- must never take the daemon down or leave the
@@ -386,7 +437,7 @@ class Server:
                 LOG.exception("browse %r failed", op)
                 reply = {"v": 1, "ok": False, "error": "roon_error",
                          "message": "browse failed"}
-                blob = (json.dumps(reply) + "\n").encode()
+                blob = _bounded_blob(reply)
             try:
                 conn.sendall(blob)
             except OSError:
@@ -436,7 +487,7 @@ class Server:
             # and an art-cache lookup, and the write can block on a slow peer;
             # neither may stall the subscriber list.
             try:
-                blob = (json.dumps(self._session.snapshot()) + "\n").encode()
+                blob = _bounded_blob(self._session.snapshot())
                 conn.settimeout(SEND_TIMEOUT)
                 conn.sendall(blob)
             except Exception:
@@ -449,7 +500,7 @@ class Server:
     def _reply_once(self, conn: socket.socket, payload: dict) -> None:
         """Send one JSON line and close. Used by the request-refusal paths."""
         try:
-            conn.sendall((json.dumps(payload) + "\n").encode())
+            conn.sendall(_bounded_blob(payload))
         except OSError:
             pass
         conn.close()
@@ -499,7 +550,7 @@ class Server:
         # a paused zone can emit nothing for hours.
         self.reap_dead_subscribers()
 
-        blob = (json.dumps(payload) + "\n").encode()
+        blob = _bounded_blob(payload)
         with self._lock:
             targets = list(self._subscribers)
         dead = [sub for sub in targets if not sub.send(blob)]

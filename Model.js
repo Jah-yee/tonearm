@@ -581,6 +581,22 @@ function moveCursor(current, delta, count) {
 // The browse session key for a surface with no screen name yet. Also the key
 // the plugin used for every surface at once, which is the defect this pair of
 // functions closes.
+// Longest NDJSON line this widget will parse. The daemon bounds its own
+// output at a quarter of this (server.MAX_PAYLOAD_BYTES), so anything larger
+// did not come from a healthy tonearmd -- and the relay runs inside
+// omarchy-shell, the process every bar widget shares, where JSON.parse on an
+// unbounded line allocates before any check made afterwards could help.
+//
+// The daemon bounding its output is the fix; this is the second line of it,
+// because the daemon should not be the only thing between a hostile Core and
+// the shell. Flagged by the marketplace security review on 2026-09-30.
+var MAX_LINE = 1024 * 1024
+
+function acceptsLine(line) {
+  if (!line) return false
+  return String(line).length <= MAX_LINE
+}
+
 var BROWSE_SESSION = "widget"
 
 // server.py refuses a session key longer than this (MAX_SESSION_KEY), and a
@@ -655,6 +671,8 @@ if (typeof module !== "undefined") {
     rowArtUrl: rowArtUrl,
     moveCursor: moveCursor,
     browseArgv: browseArgv,
-    browseSession: browseSession
+    browseSession: browseSession,
+    acceptsLine: acceptsLine,
+    MAX_LINE: MAX_LINE
   }
 }

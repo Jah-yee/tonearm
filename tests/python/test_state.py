@@ -1,6 +1,7 @@
 import json
 import os
 import sys
+import json
 import unittest
 
 sys.path.insert(0, os.path.abspath(
@@ -246,3 +247,83 @@ class TestCoreSuppliedTextIsBounded(unittest.TestCase):
         built = state.build("ok", None, None,
                             [{"id": "z1", "name": "n" * 5000, "state": "stopped"}])
         self.assertEqual(len(built["zones"][0]["name"]), state.MAX_TEXT)
+
+
+class TestEveryCoreSuppliedValueIsBounded(unittest.TestCase):
+    """The marketplace review blocked publication on this (2026-09-30).
+
+    `MAX_TEXT` bounds display labels and `MAX_ZONES` bounds the zone COUNT,
+    but `zone_id`, `state` and `core.host` were forwarded exactly as the Core
+    sent them. The payload is then published to every subscriber, and the
+    widget's relay parses and retains the whole line inside omarchy-shell --
+    the process every bar widget shares. So one oversized zone field from the
+    connected Core could exhaust shell memory while every existing bound
+    looked satisfied.
+
+    The reviewer named `zone_id` and `state`; `core.host`, `image_key` and the
+    numerics are the same fault in the same function and are fixed with them
+    rather than waiting to be found next.
+    """
+
+    def test_an_oversized_zone_id_cannot_reach_the_payload(self):
+        huge = "z" * 100_000
+        z = state.normalize_zone({"zone_id": huge, "display_name": "Kitchen",
+                                  "state": "playing"})
+        self.assertLessEqual(len(z["id"]), state.MAX_ID)
+
+    def test_an_oversized_state_cannot_reach_the_payload(self):
+        z = state.normalize_zone({"zone_id": "z1", "display_name": "Kitchen",
+                                  "state": "p" * 100_000})
+        self.assertLessEqual(len(z["state"]), state.MAX_STATE)
+
+    def test_an_oversized_core_host_cannot_reach_the_payload(self):
+        built = state.build("ok", {"host": "h" * 100_000, "name": "yavin"},
+                            None, [])
+        self.assertLessEqual(len(built["core"]["host"]), state.MAX_ID)
+
+    def test_an_oversized_image_key_cannot_reach_the_payload(self):
+        z = state.normalize_zone({
+            "zone_id": "z1", "display_name": "K", "state": "playing",
+            "now_playing": {"three_line": {"line1": "t"},
+                            "image_key": "k" * 100_000}})
+        self.assertLessEqual(len(z["now_playing"]["image_key"]), state.MAX_ID)
+
+    def test_a_non_string_image_key_does_not_propagate(self):
+        # #28: a non-string image_key reached art.Cache.get and raised
+        # TypeError inside snapshot(), which is the single source for every
+        # subscribe, status reply and broadcast -- so the widget received
+        # nothing at all while that zone was followed.
+        z = state.normalize_zone({
+            "zone_id": "z1", "display_name": "K", "state": "playing",
+            "now_playing": {"three_line": {"line1": "t"}, "image_key": {"a": 1}}})
+        self.assertIsInstance(z["now_playing"]["image_key"], str)
+
+    def test_a_string_position_is_not_carried_as_a_string(self):
+        # #21: position and length are multiplied by 1_000_000 by the MPRIS
+        # adapter. For a number that is a unit conversion; for a STRING it is
+        # Python's sequence repetition, so a 4 KB string becomes a ~4 GB
+        # string, fully allocated, before int() rejects it.
+        z = state.normalize_zone({
+            "zone_id": "z1", "display_name": "K", "state": "playing",
+            "seek_position": "9" * 4096,
+            "now_playing": {"three_line": {"line1": "t"}, "length": "8" * 4096}})
+        self.assertIsInstance(z["position"], (int, float))
+        self.assertIsInstance(z["length"], (int, float))
+
+    def test_non_numeric_volume_fields_are_coerced(self):
+        z = state.normalize_zone({
+            "zone_id": "z1", "display_name": "K", "state": "playing",
+            "outputs": [{"volume": {"value": "loud", "min": None,
+                                    "max": ["x"], "step": {}}}]})
+        for field in ("value", "min", "max", "step"):
+            self.assertIsInstance(z["volume"][field], (int, float), field)
+
+    def test_the_whole_payload_is_bounded_even_at_max_zones(self):
+        # The property the review is really about: every field bounded, times
+        # the zone cap, must still be a sane line to hand a shell.
+        hostile = [{"id": "z" * 100_000, "name": "n" * 100_000,
+                    "state": "s" * 100_000} for _ in range(500)]
+        built = state.build("ok", {"host": "h" * 100_000, "name": "c" * 100_000},
+                            None, hostile)
+        size = len(json.dumps(built))
+        self.assertLess(size, 512 * 1024, "payload was %d bytes" % size)
