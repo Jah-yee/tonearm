@@ -4,6 +4,37 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.13.1 — 2026-10-01
+
+### Fixed
+
+- **Nothing the Core sends can grow without limit any more.** Track titles,
+  album and zone names were already bounded, but a zone's identifier, its
+  state word, the Core's own address and the album-art key were passed
+  through exactly as received — and the whole payload was published to the
+  bar with nothing measuring its size. The widget then parsed and held that
+  line inside the shell every bar widget shares, so a single oversized field
+  from the connected Core could exhaust the shell's memory while every
+  existing limit looked satisfied. Raised by the Omarchy marketplace security
+  review.
+
+  Every value from the Core is now bounded, numbers are checked to actually
+  be numbers, and the published payload has a ceiling of its own. If a
+  payload ever did exceed it, the zone list is dropped before the zone you
+  are looking at, so the bar degrades rather than goes blank. The widget also
+  refuses an oversized line outright, so the daemon is not the only thing
+  standing between a misbehaving Core and the shell.
+
+  Two related faults are fixed with it
+  ([#21](https://github.com/ssandys/tonearm/issues/21),
+  [#28](https://github.com/ssandys/tonearm/issues/28)): a non-numeric
+  position or length could have been turned into a multi-gigabyte value by
+  the media-key integration, and a malformed art key could blank every update
+  the widget received.
+
+  Verified against a live Core: payloads, zone identifiers, track metadata and
+  library browsing are byte-for-byte what they were before.
+
 ## 0.13.0 — 2026-10-01
 
 Minor rather than patch: `setup.sh` gains another command, there is a new
