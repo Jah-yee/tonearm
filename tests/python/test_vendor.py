@@ -12,7 +12,10 @@ class TestVendoredRoonApi(unittest.TestCase):
     def test_imports(self):
         import roonapi
         self.assertTrue(hasattr(roonapi, "RoonApi"))
-        self.assertTrue(hasattr(roonapi, "RoonDiscovery"))
+        # RoonDiscovery was removed: it had unfixed bugs (TypeError in
+        # FormatException.__init__, IndexError in _parse_type) and was replaced
+        # by tonearm_lib/sood.py.  See tonearm#39.
+        self.assertFalse(hasattr(roonapi, "RoonDiscovery"))
 
     def test_constructor_signature_is_what_we_depend_on(self):
         # A refresh that changes this breaks scripts/tonearm_lib/core.py.
@@ -45,11 +48,15 @@ class TestVendoredRoonApi(unittest.TestCase):
         # imported with a fallback to stdlib json, so it's optional.
         self.assertEqual(found - stdlib_and_self, {"websocket", "simplejson"})
 
-    def test_soodmsg_data_file_exists(self):
-        # The discovery code reads this data file; it must not be lost to glob.
+    def test_no_sood_implementation(self):
+        # The SOOD discovery code (discovery.py, soodmessage.py, .soodmsg) was
+        # removed: it was dead code replaced by tonearm_lib/sood.py, and had
+        # unfixed bugs.  See tonearm#39.
         import roonapi, pathlib
         pkg = pathlib.Path(inspect.getfile(roonapi)).parent
-        self.assertTrue((pkg / ".soodmsg").exists())
+        self.assertFalse((pkg / "discovery.py").exists())
+        self.assertFalse((pkg / "soodmessage.py").exists())
+        self.assertFalse((pkg / ".soodmsg").exists())
 
 
 if __name__ == "__main__":
