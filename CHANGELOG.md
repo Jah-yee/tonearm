@@ -4,6 +4,18 @@ Notable changes to tonearm. Versions follow [semantic versioning](https://semver
 while the major version is 0, the minor version carries changes that would
 otherwise be breaking.
 
+## 0.14.0 — 2026-10-08
+
+### Fixed
+
+- **The widget keeps its theme colors under Qt 6.12.** Qt 6.12 adds a
+  QtQuick `Color` singleton that shadows the shell's `qs.Commons.Color`, so
+  every bare `Color.` reference in the panel and the browse pane resolved to
+  undefined and the widget lost its accent, muted and background colors. Both
+  files now import `qs.Commons as Commons` and use `Commons.Color`, matching
+  Omarchy's own fix ([omacom/omarchy#14553](https://github.com/omacom/omarchy/pull/14553)).
+  Nothing else changes, and it works the same on Qt 6.11.
+
 ## 0.13.1 — 2026-10-01
 
 ### Fixed
