@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 // NOT QtQuick.Controls: it also exports a TextField, and which one wins is
 // decided by import order rather than by anything visible at the use site.
@@ -315,7 +316,7 @@ Item {
       width: parent.width
       visible: root.path.length > 0
       text: "‹  " + root.path.join("  ›  ")
-      color: Color.muted
+      color: Commons.Color.muted
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       elide: Text.ElideRight
@@ -338,7 +339,7 @@ Item {
       visible: !root.busy && root.path.length > 0 && root.rows.length === 0
                && root.errorText.length === 0
       text: "No results"
-      color: Color.muted
+      color: Commons.Color.muted
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }
@@ -357,9 +358,9 @@ Item {
       delegate: Rectangle {
         width: list.width
         height: Style.space(38)
-        // Util.alpha(Color.foreground, 0.08) is the shell's own selected-row
-        // colour (Ui/ConfirmDialog.qml:15). Color.surfaceVariant does NOT exist.
-        color: index === root.cursor ? Util.alpha(Color.foreground, 0.08) : "transparent"
+        // Util.alpha(Commons.Color.foreground, 0.08) is the shell's own selected-row
+        // colour (Ui/ConfirmDialog.qml:15). Commons.Color.surfaceVariant does NOT exist.
+        color: index === root.cursor ? Util.alpha(Commons.Color.foreground, 0.08) : "transparent"
         radius: Style.space(4)
 
         Row {
@@ -373,7 +374,7 @@ Item {
             width: root.artPx
             height: root.artPx
             radius: Style.space(3)
-            color: Color.muted
+            color: Commons.Color.muted
             clip: true
             visible: modelData.image_key !== null
                      && modelData.image_key !== undefined
@@ -403,7 +404,7 @@ Item {
               // binding, which Qt swallows silently, leaving the binding
               // stale with no visible error anywhere.
               text: modelData.title || ""
-              color: Color.foreground
+              color: Commons.Color.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.body
               elide: Text.ElideRight
@@ -414,7 +415,7 @@ Item {
               width: parent.width
               visible: (modelData.subtitle || "").length > 0
               text: modelData.subtitle || ""
-              color: Color.muted
+              color: Commons.Color.muted
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight

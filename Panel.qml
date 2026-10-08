@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 // Resolves the qmldir beside this file, which declares Service as a singleton.
@@ -102,23 +103,23 @@ Panel {
   // the cover -- the seek fill below. Everything else, including the play
   // button, stays on the theme accent.
   readonly property color artAccent: root.useArtAccent
-    ? Model.pickAccent(root.quantizedHex, String(Color.background))
-    : Color.accent
+    ? Model.pickAccent(root.quantizedHex, String(Commons.Color.background))
+    : Commons.Color.accent
 
-  // Color.qml exposes background, foreground, accent, muted and the
-  // per-surface roles (Color.bar.*, Color.popups.*) -- there is no
+  // Commons.Color.qml exposes background, foreground, accent, muted and the
+  // per-surface roles (Commons.Color.bar.*, Commons.Color.popups.*) -- there is no
   // lightForeground/darkForeground/selection to bind to. Secondary and
-  // tertiary text and inactive fills are alpha-blended off Color.foreground
+  // tertiary text and inactive fills are alpha-blended off Commons.Color.foreground
   // here, the same technique PanelSeparator.qml uses for its own rule.
-  readonly property color fgMid: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.72)
-  readonly property color fgFaint: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.46)
-  readonly property color rowHighlight: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.10)
+  readonly property color fgMid: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.72)
+  readonly property color fgFaint: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.46)
+  readonly property color rowHighlight: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.10)
   // The seek/volume track background, at the same 0.12 alpha PanelSeparator
-  // uses for its own rule -- NOT Color.muted (#707880), a light blue-grey
+  // uses for its own rule -- NOT Commons.Color.muted (#707880), a light blue-grey
   // that reads as a fully filled bar against the near-black panel and made
   // 0:00 look indistinguishable from playing at 100%. This must look empty
   // when it is empty.
-  readonly property color trackEmpty: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+  readonly property color trackEmpty: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.12)
 
   // -- per-surface identity ------------------------------------------------
   // The relay is shared across bar surfaces; a browse cursor must NOT be, or
@@ -208,13 +209,13 @@ Panel {
     tooltipText: Model.tooltipText(root.st)
 
     // Severity reaches the bar entirely through the glyph's color, same
-    // convention as headway/galley/colophon. Not top-level Color.red /
-    // Color.yellow -- those roles do not exist on Commons/Color.qml; the
+    // convention as headway/galley/colophon. Not top-level Commons.Color.red /
+    // Commons.Color.yellow -- those roles do not exist on Commons/Commons.Color.qml; the
     // severity colors live in Model.js (COLOR_ERROR, COLOR_WARN) for the
     // same reason headway carries its own. "ok" but not playing (paused or
     // idle) dims via root.dim, a Qt.darker() of the bar's own foreground,
-    // rather than an alpha blend -- there is no Color.selection or
-    // Color.lighterBackground here to blend toward.
+    // rather than an alpha blend -- there is no Commons.Color.selection or
+    // Commons.Color.lighterBackground here to blend toward.
     //
     // root.display.playing, not a hand-rolled `root.st.zone.state ===
     // "playing"` check: Model.js already derives the identical condition to
@@ -389,7 +390,7 @@ Panel {
           }
         }
 
-        PanelSeparator { foreground: Color.foreground }
+        PanelSeparator { foreground: Commons.Color.foreground }
 
         Row {
           spacing: Style.space(14)
@@ -399,7 +400,7 @@ Panel {
             width: root.artPx
             height: root.artPx
             radius: Style.space(6)
-            color: Color.muted
+            color: Commons.Color.muted
             clip: true
 
             Image {
@@ -451,7 +452,7 @@ Panel {
                 textFormat: Text.PlainText
                 width: parent.width
                 text: root.np ? (root.np.title || "Nothing playing") : "Nothing playing"
-                color: Color.foreground
+                color: Commons.Color.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title
                 font.weight: Font.DemiBold
@@ -600,7 +601,7 @@ Panel {
                     radius: width / 2
                     // Theme accent, not root.artAccent -- Direction C reserves
                     // the art-derived color for the seek fill alone.
-                    color: Color.accent
+                    color: Commons.Color.accent
                     Text {
                       textFormat: Text.PlainText
                       anchors.centerIn: parent
@@ -610,7 +611,7 @@ Panel {
                       // old collision where the same glyph meant "is paused" in
                       // the bar and "press to play" in the popup.
                       text: root.playing ? Model.GLYPH_PAUSED : Model.GLYPH_PLAYING
-                      color: Color.background
+                      color: Commons.Color.background
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.title
                     }
@@ -691,7 +692,7 @@ Panel {
               width: volTrack.width * root.volumeFraction
               height: parent.height
               radius: parent.radius
-              // root.dim, not Color.accent -- at 100 a full-width accent bar
+              // root.dim, not Commons.Color.accent -- at 100 a full-width accent bar
               // was the brightest, heaviest element in the whole panel,
               // louder than the play button and far louder than the seek
               // bar (dark and empty at rest). Volume is secondary: readable,
@@ -729,7 +730,7 @@ Panel {
           width: parent.width
           spacing: Style.space(2)
 
-          PanelSeparator { foreground: Color.foreground }
+          PanelSeparator { foreground: Commons.Color.foreground }
           Item { width: 1; height: Style.space(6) }
 
           // The caption line carries the search hint on its right, which is
@@ -803,7 +804,7 @@ Panel {
                   height: Style.space(5)
                   radius: width / 2
                   anchors.verticalCenter: parent.verticalCenter
-                  color: zoneRow.modelData.state === "playing" ? Color.accent : Color.muted
+                  color: zoneRow.modelData.state === "playing" ? Commons.Color.accent : Commons.Color.muted
                 }
                 Text {
                   textFormat: Text.PlainText
@@ -857,7 +858,7 @@ Panel {
                 text: Model.GLYPH_TRANSFER
                 // Lighting up on hover is what says "this is a separate
                 // target", on a row whose whole surface is already clickable.
-                color: transferArea.containsMouse ? Color.accent : root.fgFaint
+                color: transferArea.containsMouse ? Commons.Color.accent : root.fgFaint
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.bodySmall
 
