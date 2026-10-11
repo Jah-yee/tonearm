@@ -16,7 +16,11 @@ installation requirement). System Python already has both `websocket` and `json`
 
 To refresh: bump the version, repeat the copy, re-run `./bin/test`, check
 `RoonApi.__init__`'s signature has not changed, and **re-apply the local
-patches below** — a plain copy drops them.
+patches below** — a plain copy drops them. **Also delete the SOOD discovery
+files** (`roonapi/discovery.py`, `roonapi/soodmessage.py`,
+`roonapi/.soodmsg`) and strip the `RoonDiscovery` import from
+`roonapi/__init__.py`; they are dead code (see tonearm#39) and a refresh
+would otherwise bring them back.
 
 ## Local patches
 

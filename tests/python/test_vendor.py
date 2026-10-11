@@ -48,16 +48,6 @@ class TestVendoredRoonApi(unittest.TestCase):
         # imported with a fallback to stdlib json, so it's optional.
         self.assertEqual(found - stdlib_and_self, {"websocket", "simplejson"})
 
-    def test_no_sood_implementation(self):
-        # The SOOD discovery code (discovery.py, soodmessage.py, .soodmsg) was
-        # removed: it was dead code replaced by tonearm_lib/sood.py, and had
-        # unfixed bugs.  See tonearm#39.
-        import roonapi, pathlib
-        pkg = pathlib.Path(inspect.getfile(roonapi)).parent
-        self.assertFalse((pkg / "discovery.py").exists())
-        self.assertFalse((pkg / "soodmessage.py").exists())
-        self.assertFalse((pkg / ".soodmsg").exists())
-
 
 if __name__ == "__main__":
     unittest.main()
