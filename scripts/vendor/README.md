@@ -18,13 +18,14 @@ To refresh: bump the version, repeat the copy, re-run `./bin/test`, check
 `RoonApi.__init__`'s signature has not changed, and **re-apply the local
 patches below** — a plain copy drops them. **Also delete the SOOD discovery
 files** (`roonapi/discovery.py`, `roonapi/soodmessage.py`,
-`roonapi/.soodmsg`) and strip the `RoonDiscovery` import from
-`roonapi/__init__.py`; they are dead code (see tonearm#39) and a refresh
+`roonapi/.soodmsg`), strip the `RoonDiscovery` import from
+`roonapi/__init__.py`, and remove `SOOD_PORT` and `SOOD_MULTICAST_IP` from
+`roonapi/constants.py`; they are dead code (see tonearm#39) and a refresh
 would otherwise bring them back.
 
 ## Local patches
 
-Marked in the source with `LOCAL PATCH (tonearm #13)` and pinned by
+Marked in the source with `LOCAL PATCH (tonearm #<issue>)` and pinned by
 `tests/python/test_vendor_patches.py`, so a refresh that loses them fails the
 suite rather than failing a user. Each is worth re-checking against upstream
 on a bump: if 0.1.7 has fixed it, drop the divergence and the test with it.
@@ -48,11 +49,12 @@ on a bump: if 0.1.7 has fixed it, drop the divergence and the test with it.
 **SOOD discovery files removed** ([#39](https://github.com/ssandys/tonearm/issues/39)):
 
 - `roonapi/discovery.py`, `roonapi/soodmessage.py`, and `roonapi/.soodmsg` were
-  deleted; `roonapi/__init__.py` no longer imports `RoonDiscovery`.  The SOOD
+  deleted; `roonapi/__init__.py` no longer imports `RoonDiscovery`, and
+  `roonapi/constants.py` no longer defines `SOOD_PORT` or `SOOD_MULTICAST_IP`.  The SOOD
   multicast discovery in these files was never instantiated — `tonearm_lib/sood.py`
   replaced it with a unicast-probing approach.  The deleted files had unfixed
   bugs: `FormatException.__init__` calls `Exception.__init__()` without `self`
   (always raises `TypeError`), `_parse_type` raises `IndexError` on a bare
   `SOOD\x02` datagram, and `_parse_property` misaligns on multi-byte UTF-8.
-  `tests/python/test_vendor.py:test_no_sood_implementation` asserts the files
-  stay removed after a vendor refresh.
+  `TestNoSoodImplementation` in `tests/python/test_vendor_patches.py` asserts
+  they stay removed after a vendor refresh.

@@ -12,10 +12,6 @@ class TestVendoredRoonApi(unittest.TestCase):
     def test_imports(self):
         import roonapi
         self.assertTrue(hasattr(roonapi, "RoonApi"))
-        # RoonDiscovery was removed: it had unfixed bugs (TypeError in
-        # FormatException.__init__, IndexError in _parse_type) and was replaced
-        # by tonearm_lib/sood.py.  See tonearm#39.
-        self.assertFalse(hasattr(roonapi, "RoonDiscovery"))
 
     def test_constructor_signature_is_what_we_depend_on(self):
         # A refresh that changes this breaks scripts/tonearm_lib/core.py.

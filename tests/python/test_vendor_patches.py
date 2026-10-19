@@ -121,6 +121,7 @@ class TestARemovalIsPublished(unittest.TestCase):
         a._on_state_change({"zones_removed": ["gone"]})
         self.assertEqual(a._zones, {})
 
+
 class TestNoSoodImplementation(unittest.TestCase):
     """The SOOD discovery code (discovery.py, soodmessage.py, .soodmsg) was
     removed: it was dead code replaced by tonearm_lib/sood.py, and had
@@ -137,6 +138,11 @@ class TestNoSoodImplementation(unittest.TestCase):
         import roonapi
         self.assertFalse(hasattr(roonapi, "RoonDiscovery"))
 
+    def test_constants_define_no_sood_values(self):
+        # Their only consumer was discovery.py. tonearm_lib/sood.py has its own.
+        from roonapi import constants
+        self.assertFalse(hasattr(constants, "SOOD_PORT"))
+        self.assertFalse(hasattr(constants, "SOOD_MULTICAST_IP"))
 
 
 if __name__ == "__main__":

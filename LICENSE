@@ -29,8 +29,9 @@ following, which are used as-is and keep their own licenses:
 
 ### Vendored: roonapi 0.1.6
 
-`scripts/vendor/roonapi/` is a vendored copy of `roonapi` 0.1.6 with local patches (see below)
-from https://github.com/pavoni/pyroon, licensed **Apache License 2.0**. Its
+`scripts/vendor/roonapi/` is a vendored copy of `roonapi` 0.1.6 with local
+patches (listed in `scripts/vendor/README.md` and marked `LOCAL PATCH` in the
+source) from https://github.com/pavoni/pyroon, licensed **Apache License 2.0**. Its
 own license text is retained in place at `scripts/vendor/roonapi/LICENSE` and
 must not be altered. See `scripts/vendor/README.md` for why it is vendored
 rather than installed as a system package, and how to refresh it.

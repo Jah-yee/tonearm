@@ -2,6 +2,8 @@ from __future__ import unicode_literals
 
 import logging
 
+# LOCAL PATCH (tonearm #39): SOOD_PORT and SOOD_MULTICAST_IP removed along with
+# discovery.py, their only consumer. tonearm_lib/sood.py owns SOOD.
 
 SERVICE_REGISTRY = "com.roonlabs.registry:1"
 SERVICE_TRANSPORT = "com.roonlabs.transport:2"
